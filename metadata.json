@@ -1,0 +1,6 @@
+{
+  "name": "Spider-Man Mobile Game",
+  "description": "An action-packed AAA Spider-Man mobile runner featuring 100+ campaign levels, gyroscope tilt swinging physics, boss battles against Green Goblin, Doc Ock, Electro, and Venom, unlockable suits, and console-grade landscape UI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
