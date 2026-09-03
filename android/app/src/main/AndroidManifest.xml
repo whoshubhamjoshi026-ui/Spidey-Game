@@ -7,6 +7,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Har chote-bade screen size aur aspect ratio ko support karne ke liye -->
+    <supports-screens
+        android:smallScreens="true"
+        android:normalScreens="true"
+        android:largeScreens="true"
+        android:xlargeScreens="true"
+        android:anyDensity="true" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -19,13 +27,27 @@
         android:theme="@style/Theme.SpiderManGame.Fullscreen"
         tools:targetApi="34">
 
+        <!-- Modern ultrawide/lambe phones par black borders hatane ke liye -->
+        <meta-data
+            android:name="android.max_aspect"
+            android:value="2.4" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize"
+            tools:targetApi="28">
+            
+            <!-- Camera cutout / Notch wale hisse me bhi game stretch karne ke liye -->
+            <layout
+                android:defaultHeight="100%"
+                android:defaultWidth="100%"
+                android:gravity="top|left" />
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
