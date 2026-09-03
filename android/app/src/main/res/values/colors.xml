@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_dark">#05070e</color>
+    <color name="card_dark">#0a0f1d</color>
+    <color name="spider_red">#ef4444</color>
+    <color name="spider_blue">#0284c7</color>
+    <color name="cyan_accent">#38bdf8</color>
+    <color name="text_white">#f8fafc</color>
+    <color name="text_muted">#94a3b8</color>
+</resources>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark">
+
+    <!-- Primary Game WebView -->
+    <WebView
+        android:id="@+id/gameWebView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:overScrollMode="never" />
+
+    <!-- Loading Overlay Screen -->
+    <LinearLayout
+        android:id="@+id/loadingLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/bg_dark"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:visibility="visible">
+
+        <ProgressBar
+            android:id="@+id/loadingProgressBar"
+            style="?android:attr/progressBarStyleLarge"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:indeterminateTint="@color/spider_red" />
+
+        <TextView
+            android:id="@+id/loadingStatusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.1"
+            android:text="@string/loading_game"
+            android:textColor="@color/cyan_accent"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:id="@+id/horizontalLoadingBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="220dp"
+            android:layout_height="6dp"
+            android:layout_marginTop="14dp"
+            android:max="100"
+            android:progress="15"
+            android:progressTint="@color/spider_red" />
+
+    </LinearLayout>
+
+    <!-- Offline / Network Error Screen -->
+    <LinearLayout
+        android:id="@+id/errorLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/bg_dark"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.08"
+            android:text="@string/offline_title"
+            android:textColor="@color/spider_red"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="24dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="24dp"
+            android:gravity="center"
+            android:maxWidth="480dp"
+            android:text="@string/offline_message"
+            android:textColor="@color/text_muted"
+            android:textSize="14sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/retryButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:backgroundTint="@color/spider_red"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.05"
+            android:paddingHorizontal="28dp"
+            android:paddingVertical="12dp"
+            android:text="@string/retry_button"
+            android:textColor="@color/text_white"
+            app:cornerRadius="8dp" />
+
+    </LinearLayout>
+
+</FrameLayout>

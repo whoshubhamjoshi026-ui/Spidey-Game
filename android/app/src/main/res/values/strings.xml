@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Spider-Man Web Runner</string>
+    <string name="loading_game">INITIALIZING SPIDER-MAN NEURAL LINK…</string>
+    <string name="offline_title">NEURAL LINK DISCONNECTED</string>
+    <string name="offline_message">Unable to connect to the Spider-Man game server. Please check your Wi-Fi or cellular data connection and try again.</string>
+    <string name="retry_button">RETRY CONNECTION</string>
+</resources>

@@ -75,9 +75,31 @@ export class SpiderGameEngine {
   public maxJumps: number = 2;
   public playerRotation: number = 0;
   public runAnimCycle: number = 0;
-  public heroPose: 'run' | 'jump' | 'flip' | 'swing' | 'dive' | 'land' | 'ultimate' | 'web_wings' = 'run';
+  public heroPose: 'run' | 'sprint' | 'jump' | 'flip' | 'swing_start' | 'swing' | 'swing_apex' | 'dive' | 'land' | 'ultimate' | 'web_wings' = 'run';
   public eyeSquint: number = 0; // 0 to 1
-  public playerTrails: { x: number; y: number; rotation: number; pose: string; alpha: number }[] = [];
+  public playerTrails: { x: number; y: number; rotation: number; pose: string; alpha: number; color?: string }[] = [];
+
+  // High-Fidelity Skeletal Animation System & Joint Kinematics
+  public landingTimer: number = 0;
+  public sprintLean: number = 0;
+  public heroGlowPulse: number = 0;
+  public swingPhase: 'start' | 'mid' | 'apex' = 'mid';
+  public skeleton = {
+    torsoAngle: 0,
+    torsoOffsetY: 0,
+    headAngle: 0,
+    armLeadUpper: 0,
+    armLeadLower: 0,
+    armTrailUpper: 0,
+    armTrailLower: 0,
+    legLeadUpper: 0,
+    legLeadLower: 0,
+    legTrailUpper: 0,
+    legTrailLower: 0,
+    webAnchorAngle: 0,
+    armLeadGesture: 'thwip' as 'thwip' | 'fist' | 'open' | 'web_grip',
+    armTrailGesture: 'fist' as 'thwip' | 'fist' | 'open' | 'web_grip',
+  };
 
   // Gyroscope / Device Orientation Physics
   public gyroTilt: number = 0; // -1.0 (left) to +1.0 (right)
@@ -1043,41 +1065,38 @@ export class SpiderGameEngine {
     }, 1800);
   }
 
-  // --- HERO PHYSICS ENGINE & GYROSCOPE TILT INTERACTION ---
+  // --- HERO PHYSICS ENGINE & PROCEDURAL SKELETAL ANIMATION ---
   private updateHeroPhysics(dt: number) {
     const canvasH = this.canvas.height;
     const effectiveTilt = this.keyTilt !== 0 ? this.keyTilt : this.gyroTilt;
 
-    // Motion Blur Trail Generator
+    // Luminous Glow Pulse & Chromatic Motion Blur Trails
+    this.heroGlowPulse = 0.5 + Math.sin(this.frameCount * 0.15) * 0.25 + Math.min(0.5, this.combo * 0.05);
+
     if (this.frameCount % 2 === 0) {
       this.playerTrails.unshift({
         x: this.playerX,
         y: this.playerY,
         rotation: this.playerRotation,
         pose: this.heroPose,
-        alpha: 0.5,
+        alpha: 0.65,
+        color: this.suit.glowColor || this.suit.primaryColor,
       });
-      if (this.playerTrails.length > 6) {
+      if (this.playerTrails.length > 8) {
         this.playerTrails.pop();
       }
     }
-    this.playerTrails.forEach((t) => (t.alpha -= 0.08 * dt));
+    this.playerTrails.forEach((t) => (t.alpha -= 0.07 * dt));
     this.playerTrails = this.playerTrails.filter((t) => t.alpha > 0);
 
-    // Web Swinging Pendulum Mechanics (with Gyroscope Tilt Angular Acceleration!)
+    // Web Swinging Pendulum Mechanics with Dynamic Pose Stages
     if (this.isSwinging) {
-      // Base pendulum acceleration: a = -(g / L) * sin(theta)
-      const pendulumGravity = 0.0035;
+      const pendulumGravity = 0.0036;
       let angularAcc = -pendulumGravity * Math.sin(this.swingAngle);
-
-      // Gyroscope tilt directly influences angular acceleration & momentum!
-      // Tilting phone right adds clockwise angular torque; tilting left adds counter-clockwise torque
       angularAcc += effectiveTilt * 0.0028;
 
       this.swingAngularVelocity += angularAcc * dt;
       this.swingAngle += this.swingAngularVelocity * dt;
-
-      // Restrict swing bounds to smooth circular arc
       this.swingAngle = Math.max(-1.45, Math.min(1.45, this.swingAngle));
 
       // Calculate Player position on swing arc
@@ -1087,29 +1106,42 @@ export class SpiderGameEngine {
       this.playerX = currentSwingX - this.playerWidth / 2;
       this.playerY = canvasH - currentSwingY;
 
-      // Orient hero body tangentially to swing curve
-      this.playerRotation = this.swingAngle + (this.swingAngularVelocity > 0 ? 0.3 : -0.3);
+      // Dynamic Swing Stage Transitions
+      if (this.swingAngle < -0.65 && this.swingAngularVelocity > 0) {
+        this.heroPose = 'swing_start';
+        this.swingPhase = 'start';
+      } else if (this.swingAngle > 0.45 && this.swingAngularVelocity > 0) {
+        this.heroPose = 'swing_apex';
+        this.swingPhase = 'apex';
+      } else {
+        this.heroPose = 'swing';
+        this.swingPhase = 'mid';
+      }
+
+      // Hero body rotates smoothly with pendulum arc
+      const targetRotation = this.swingAngle + (this.swingAngularVelocity > 0 ? 0.35 : -0.35);
+      this.playerRotation += (targetRotation - this.playerRotation) * 0.2 * dt;
 
       // Camera dynamic tilt follows swing angle + phone tilt
-      this.targetCameraTilt = this.swingAngle * 0.08 + effectiveTilt * 0.04;
+      this.targetCameraTilt = this.swingAngle * 0.09 + effectiveTilt * 0.04;
 
-      // Web particles trailing along swing
-      if (this.frameCount % 4 === 0) {
+      // High-speed swing energy and wind particles
+      if (this.frameCount % 3 === 0) {
         this.particles.push({
-          x: this.playerX + 20,
-          y: canvasH - this.playerY,
-          vx: -this.gameSpeed * 0.6,
-          vy: (Math.random() - 0.5) * 2,
-          size: 2,
-          color: '#ffffff',
-          alpha: 0.7,
-          life: 18,
-          maxLife: 18,
+          x: this.playerX + 15 + Math.random() * 20,
+          y: canvasH - this.playerY + 10,
+          vx: -this.gameSpeed * 0.8 - Math.random() * 2,
+          vy: (Math.random() - 0.5) * 3,
+          size: 2.5,
+          color: this.suit.glowColor || '#ffffff',
+          alpha: 0.8,
+          life: 16,
+          maxLife: 16,
           type: 'web',
         });
       }
 
-      // Check ground collision during swing
+      // Ground collision during swing
       if (this.playerY <= this.groundHeight) {
         this.playerY = this.groundHeight;
         this.isSwinging = false;
@@ -1118,79 +1150,327 @@ export class SpiderGameEngine {
         this.heroPose = 'run';
         this.targetCameraTilt = 0;
       }
+      
+      this.updateHeroSkeletalAnimation(dt);
       return;
     }
 
-    // Free Flight / Running / Falling Physics
+    // Landing Recoil Timer Handling
+    if (this.landingTimer > 0) {
+      this.landingTimer -= dt;
+      if (this.landingTimer <= 0) {
+        this.heroPose = (this.gameSpeed >= 5.2 || this.combo >= 3) ? 'sprint' : 'run';
+      }
+    }
+
+    // Free Flight / Airborne / Falling Physics
     if (!this.isGrounded) {
-      // Gliding with Web Wings reduces gravity
-      const effectiveGravity = this.webWingsTimer > 0 ? this.gravity * 0.35 : this.gravity;
+      const effectiveGravity = this.webWingsTimer > 0 ? this.gravity * 0.32 : this.gravity;
       this.velocityY += effectiveGravity * dt;
       this.playerY += this.velocityY * dt;
 
       // Gyroscope tilt horizontal nudge during free flight
       if (Math.abs(effectiveTilt) > 0.1) {
-        this.velocityX += effectiveTilt * 0.25 * dt;
+        this.velocityX += effectiveTilt * 0.28 * dt;
       }
 
       if (this.velocityX !== 0) {
-        this.playerX = Math.max(80, Math.min(260, this.playerX + this.velocityX * dt));
+        this.playerX = Math.max(80, Math.min(270, this.playerX + this.velocityX * dt));
         this.velocityX *= 0.94;
       } else {
         this.playerX += (140 - this.playerX) * 0.03 * dt;
       }
 
-      // Hero In-Air Poses & Rotations
+      // In-Air Poses & Rotations
       if (this.heroPose === 'flip') {
-        this.playerRotation += 0.22 * dt;
+        this.playerRotation += 0.24 * dt;
         if (this.playerRotation >= Math.PI * 2) {
           this.playerRotation = 0;
-          this.heroPose = 'jump';
+          this.heroPose = this.velocityY < -4 ? 'dive' : 'jump';
         }
       } else if (this.webWingsTimer > 0) {
         this.heroPose = 'web_wings';
-        this.playerRotation = 0.1 + effectiveTilt * 0.1;
-      } else if (this.velocityY < -5) {
+        this.playerRotation = 0.08 + effectiveTilt * 0.12;
+      } else if (this.velocityY < -4.5) {
         this.heroPose = 'dive';
-        this.playerRotation = -0.25;
+        this.playerRotation += (-0.3 - this.playerRotation) * 0.15 * dt;
+      } else if (this.velocityY > 2) {
+        this.heroPose = 'jump';
+        this.playerRotation += (0.08 - this.playerRotation) * 0.15 * dt;
       } else {
-        this.playerRotation = 0.1;
+        this.playerRotation += (0 - this.playerRotation) * 0.15 * dt;
       }
 
-      // Ground landing
+      // Ground Landing Detection
       if (this.playerY <= this.groundHeight) {
         this.playerY = this.groundHeight;
+        const hardLanding = this.velocityY < -7.0;
         this.velocityY = 0;
         this.isGrounded = true;
         this.jumpCount = 0;
-        this.heroPose = 'run';
         this.playerRotation = 0;
         this.eyeSquint = 0;
 
+        if (hardLanding) {
+          this.heroPose = 'land';
+          this.landingTimer = 10;
+          this.triggerScreenShake(8);
+        } else {
+          this.heroPose = (this.gameSpeed >= 5.2 || this.combo >= 3) ? 'sprint' : 'run';
+        }
+
         this.createLandingRipples(this.playerX + 40, canvasH - this.groundHeight);
       }
-    } else {
-      // Ground Run Cycle
-      this.runAnimCycle += 0.28 * (this.gameSpeed / 7.2) * dt;
-      this.playerRotation = Math.sin(this.runAnimCycle) * 0.05;
-      this.heroPose = 'run';
+    } else if (this.landingTimer <= 0) {
+      // Ground Run & Supersonic Sprint Cycle
+      const isSprint = this.gameSpeed >= 5.2 || this.combo >= 3;
+      this.heroPose = isSprint ? 'sprint' : 'run';
 
-      // Run footstep smoke particles
-      if (this.frameCount % 8 === 0) {
+      const cycleSpeed = (0.28 + (this.gameSpeed / 18)) * dt;
+      this.runAnimCycle += cycleSpeed;
+      this.playerRotation = Math.sin(this.runAnimCycle) * (isSprint ? 0.08 : 0.04);
+
+      // Run / Sprint Footstep smoke and friction sparks
+      if (this.frameCount % (isSprint ? 4 : 7) === 0) {
         this.particles.push({
           x: this.playerX + 20,
           y: canvasH - this.groundHeight - 4,
-          vx: -3 - Math.random() * 2,
-          vy: -0.5 - Math.random() * 1.5,
+          vx: -3.5 - Math.random() * 2.5,
+          vy: -0.6 - Math.random() * 1.5,
           size: 3 + Math.random() * 3,
-          color: 'rgba(148, 163, 184, 0.4)',
-          alpha: 0.6,
+          color: isSprint ? (this.suit.glowColor || 'rgba(56, 189, 248, 0.6)') : 'rgba(148, 163, 184, 0.45)',
+          alpha: 0.65,
           life: 14,
           maxLife: 14,
-          type: 'smoke',
+          type: isSprint ? 'spark' : 'smoke',
         });
       }
     }
+
+    this.updateHeroSkeletalAnimation(dt);
+  }
+
+  // --- PROCEDURAL SKELETAL KINEMATICS & POSE BLENDING ENGINE ---
+  private updateHeroSkeletalAnimation(dt: number) {
+    const s = this.skeleton;
+    const lerpSpeed = 0.22 * dt;
+    const runCycle = this.runAnimCycle;
+
+    // Target bone angles calculated based on current heroPose
+    let targetTorsoAngle = 0;
+    let targetTorsoOffsetY = 0;
+    let targetHeadAngle = 0;
+    let targetArmLeadUpper = 0;
+    let targetArmLeadLower = 0.2;
+    let targetArmTrailUpper = 0;
+    let targetArmTrailLower = 0.2;
+    let targetLegLeadUpper = 0;
+    let targetLegLeadLower = -0.2;
+    let targetLegTrailUpper = 0;
+    let targetLegTrailLower = -0.2;
+    let targetArmLeadGesture: 'thwip' | 'fist' | 'open' | 'web_grip' = 'thwip';
+    let targetArmTrailGesture: 'thwip' | 'fist' | 'open' | 'web_grip' = 'fist';
+
+    // Calculate angle to web anchor if swinging
+    if (this.isSwinging) {
+      const heroScreenY = this.canvas.height - this.playerY;
+      const dx = this.swingAnchorX - (this.playerX + this.playerWidth / 2);
+      const dy = this.swingAnchorY - heroScreenY;
+      s.webAnchorAngle = Math.atan2(dy, dx);
+    }
+
+    switch (this.heroPose) {
+      case 'run':
+        targetTorsoAngle = -0.12;
+        targetTorsoOffsetY = Math.abs(Math.sin(runCycle)) * 3;
+        targetHeadAngle = 0.05;
+        targetArmLeadUpper = Math.sin(runCycle) * 0.75;
+        targetArmLeadLower = 0.4 + Math.max(0, Math.sin(runCycle)) * 0.3;
+        targetArmTrailUpper = Math.sin(runCycle + Math.PI) * 0.75;
+        targetArmTrailLower = 0.4 + Math.max(0, Math.sin(runCycle + Math.PI)) * 0.3;
+        targetLegLeadUpper = Math.sin(runCycle + Math.PI) * 0.85;
+        targetLegLeadLower = -0.3 - Math.max(0, Math.sin(runCycle + Math.PI)) * 0.4;
+        targetLegTrailUpper = Math.sin(runCycle) * 0.85;
+        targetLegTrailLower = -0.3 - Math.max(0, Math.sin(runCycle)) * 0.4;
+        targetArmLeadGesture = 'fist';
+        targetArmTrailGesture = 'fist';
+        break;
+
+      case 'sprint':
+        targetTorsoAngle = -0.32; // Deep athletic forward lean
+        targetTorsoOffsetY = 6 + Math.abs(Math.sin(runCycle)) * 3.5;
+        targetHeadAngle = 0.18; // Head raised forward
+        targetArmLeadUpper = Math.sin(runCycle) * 1.1;
+        targetArmLeadLower = 0.6 + Math.max(0, Math.sin(runCycle)) * 0.4;
+        targetArmTrailUpper = Math.sin(runCycle + Math.PI) * 1.1;
+        targetArmTrailLower = 0.6 + Math.max(0, Math.sin(runCycle + Math.PI)) * 0.4;
+        targetLegLeadUpper = Math.sin(runCycle + Math.PI) * 1.15;
+        targetLegLeadLower = -0.4 - Math.max(0, Math.sin(runCycle + Math.PI)) * 0.5;
+        targetLegTrailUpper = Math.sin(runCycle) * 1.15;
+        targetLegTrailLower = -0.4 - Math.max(0, Math.sin(runCycle)) * 0.5;
+        targetArmLeadGesture = 'open';
+        targetArmTrailGesture = 'open';
+        break;
+
+      case 'swing_start':
+        targetTorsoAngle = 0.35; // Arching back into swing
+        targetTorsoOffsetY = 0;
+        targetHeadAngle = -0.25;
+        targetArmLeadUpper = -1.7; // Lead arm reaching high for web line
+        targetArmLeadLower = 0.1;
+        targetArmTrailUpper = 0.8; // Trailing arm flared back
+        targetArmTrailLower = 0.4;
+        targetLegLeadUpper = -0.7; // Legs tucking in preparation
+        targetLegLeadLower = -0.6;
+        targetLegTrailUpper = -0.4;
+        targetLegTrailLower = -0.5;
+        targetArmLeadGesture = 'web_grip';
+        targetArmTrailGesture = 'open';
+        break;
+
+      case 'swing':
+        targetTorsoAngle = 0.2 + this.swingAngle * 0.5;
+        targetTorsoOffsetY = 0;
+        targetHeadAngle = -0.15;
+        targetArmLeadUpper = -1.55;
+        targetArmLeadLower = 0.25;
+        targetArmTrailUpper = 0.65;
+        targetArmTrailLower = 0.5;
+        targetLegLeadUpper = 0.45 + this.swingAngle * 0.3;
+        targetLegLeadLower = -0.4;
+        targetLegTrailUpper = 0.75 + this.swingAngle * 0.3;
+        targetLegTrailLower = -0.55;
+        targetArmLeadGesture = 'web_grip';
+        targetArmTrailGesture = 'open';
+        break;
+
+      case 'swing_apex':
+        targetTorsoAngle = -0.25; // Snapping forward at apex
+        targetTorsoOffsetY = 0;
+        targetHeadAngle = 0.2;
+        targetArmLeadUpper = -1.2;
+        targetArmLeadLower = 0.5;
+        targetArmTrailUpper = -0.8;
+        targetArmTrailLower = 0.5;
+        targetLegLeadUpper = -0.9; // Dynamic kick forward
+        targetLegLeadLower = -0.3;
+        targetLegTrailUpper = 0.5;
+        targetLegTrailLower = -0.6;
+        targetArmLeadGesture = 'thwip';
+        targetArmTrailGesture = 'thwip';
+        break;
+
+      case 'jump':
+        targetTorsoAngle = -0.1;
+        targetTorsoOffsetY = -2;
+        targetHeadAngle = 0.1;
+        targetArmLeadUpper = 0.7;
+        targetArmLeadLower = 0.5;
+        targetArmTrailUpper = -0.7;
+        targetArmTrailLower = 0.5;
+        targetLegLeadUpper = -0.7;
+        targetLegLeadLower = -0.6;
+        targetLegTrailUpper = 0.4;
+        targetLegTrailLower = -0.5;
+        targetArmLeadGesture = 'thwip';
+        targetArmTrailGesture = 'fist';
+        break;
+
+      case 'flip':
+        targetTorsoAngle = 0;
+        targetTorsoOffsetY = 0;
+        targetHeadAngle = -0.3;
+        targetArmLeadUpper = -1.2;
+        targetArmLeadLower = 1.0;
+        targetArmTrailUpper = -1.2;
+        targetArmTrailLower = 1.0;
+        targetLegLeadUpper = -1.1;
+        targetLegLeadLower = -1.0;
+        targetLegTrailUpper = -1.1;
+        targetLegTrailLower = -1.0;
+        targetArmLeadGesture = 'fist';
+        targetArmTrailGesture = 'fist';
+        break;
+
+      case 'dive':
+        targetTorsoAngle = -0.55; // Aerodynamic head-first dive
+        targetTorsoOffsetY = 0;
+        targetHeadAngle = 0.35;
+        targetArmLeadUpper = 1.45; // Arms pinned back against sides
+        targetArmLeadLower = 0.1;
+        targetArmTrailUpper = 1.45;
+        targetArmTrailLower = 0.1;
+        targetLegLeadUpper = 0.2;
+        targetLegLeadLower = -0.1;
+        targetLegTrailUpper = 0.2;
+        targetLegTrailLower = -0.1;
+        targetArmLeadGesture = 'open';
+        targetArmTrailGesture = 'open';
+        break;
+
+      case 'web_wings':
+        targetTorsoAngle = -0.22;
+        targetTorsoOffsetY = 0;
+        targetHeadAngle = 0.15;
+        targetArmLeadUpper = -1.35; // Arms outstretched wide
+        targetArmLeadLower = 0.15;
+        targetArmTrailUpper = 1.35;
+        targetArmTrailLower = 0.15;
+        targetLegLeadUpper = 0.1;
+        targetLegLeadLower = -0.2;
+        targetLegTrailUpper = 0.2;
+        targetLegTrailLower = -0.2;
+        targetArmLeadGesture = 'open';
+        targetArmTrailGesture = 'open';
+        break;
+
+      case 'land':
+        targetTorsoAngle = -0.45; // 3-point superhero landing crouch
+        targetTorsoOffsetY = 12;
+        targetHeadAngle = 0.45; // Looking forward
+        targetArmLeadUpper = 0.6; // Fist touching ground
+        targetArmLeadLower = 0.8;
+        targetArmTrailUpper = -1.2; // Back arm flared
+        targetArmTrailLower = 0.4;
+        targetLegLeadUpper = -1.2; // Lead knee deep under chest
+        targetLegLeadLower = -1.1;
+        targetLegTrailUpper = 0.9; // Back leg extended
+        targetLegTrailLower = -0.3;
+        targetArmLeadGesture = 'fist';
+        targetArmTrailGesture = 'open';
+        break;
+
+      case 'ultimate':
+        targetTorsoAngle = 0;
+        targetTorsoOffsetY = -6;
+        targetHeadAngle = -0.1;
+        targetArmLeadUpper = -1.4;
+        targetArmLeadLower = 0.2;
+        targetArmTrailUpper = 1.4;
+        targetArmTrailLower = 0.2;
+        targetLegLeadUpper = -0.5;
+        targetLegLeadLower = -0.4;
+        targetLegTrailUpper = 0.5;
+        targetLegTrailLower = -0.4;
+        targetArmLeadGesture = 'open';
+        targetArmTrailGesture = 'open';
+        break;
+    }
+
+    // Smooth continuous bone interpolation (60fps dampening)
+    s.torsoAngle += (targetTorsoAngle - s.torsoAngle) * lerpSpeed;
+    s.torsoOffsetY += (targetTorsoOffsetY - s.torsoOffsetY) * lerpSpeed;
+    s.headAngle += (targetHeadAngle - s.headAngle) * lerpSpeed;
+    s.armLeadUpper += (targetArmLeadUpper - s.armLeadUpper) * lerpSpeed;
+    s.armLeadLower += (targetArmLeadLower - s.armLeadLower) * lerpSpeed;
+    s.armTrailUpper += (targetArmTrailUpper - s.armTrailUpper) * lerpSpeed;
+    s.armTrailLower += (targetArmTrailLower - s.armTrailLower) * lerpSpeed;
+    s.legLeadUpper += (targetLegLeadUpper - s.legLeadUpper) * lerpSpeed;
+    s.legLeadLower += (targetLegLeadLower - s.legLeadLower) * lerpSpeed;
+    s.legTrailUpper += (targetLegTrailUpper - s.legTrailUpper) * lerpSpeed;
+    s.legTrailLower += (targetLegTrailLower - s.legTrailLower) * lerpSpeed;
+    s.armLeadGesture = targetArmLeadGesture;
+    s.armTrailGesture = targetArmTrailGesture;
   }
 
   // --- WEBS & PROJECTILES UPDATE ---
@@ -2614,120 +2894,279 @@ export class SpiderGameEngine {
   private renderSpiderManHero(h: number) {
     const ctx = this.ctx;
     const heroScreenY = h - this.playerY;
+    const suit = this.suit;
+    const s = this.skeleton;
+    const isSprint = this.heroPose === 'sprint';
+    const isSwing = this.isSwinging;
 
-    // Ground dynamic contact shadow
+    // Ground dynamic contact shadow (scales with jump elevation & squash)
     if (this.isGrounded) {
       ctx.save();
-      ctx.fillStyle = 'rgba(2, 6, 23, 0.45)';
+      const shadowW = 26 + Math.abs(Math.sin(this.runAnimCycle)) * 6;
+      const shadowH = 7 - (s.torsoOffsetY > 6 ? 2 : 0);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.5)';
       ctx.beginPath();
-      ctx.ellipse(this.playerX + this.playerWidth / 2, h - this.groundHeight + 2, 24, 7, 0, 0, Math.PI * 2);
+      ctx.ellipse(this.playerX + this.playerWidth / 2, h - this.groundHeight + 2, shadowW, shadowH, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+    } else {
+      // Projected ground shadow when airborne
+      const altitude = Math.max(0, this.playerY - this.groundHeight);
+      if (altitude < 350) {
+        const shadowScale = Math.max(0.2, 1 - altitude / 350);
+        ctx.save();
+        ctx.fillStyle = `rgba(2, 6, 23, ${0.35 * shadowScale})`;
+        ctx.beginPath();
+        ctx.ellipse(this.playerX + this.playerWidth / 2, h - this.groundHeight + 2, 28 * shadowScale, 8 * shadowScale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
     }
 
-    // Render Speed Ghost Blur Trails with suit glow
+    // 1. High-Speed Ghost Blur Afterimages with Dynamic Suit Glow
     this.playerTrails.forEach((trail) => {
       ctx.save();
       ctx.translate(trail.x + this.playerWidth / 2, h - trail.y - this.playerHeight / 2);
       ctx.rotate(trail.rotation);
-      ctx.globalAlpha = trail.alpha * 0.35;
-      ctx.fillStyle = this.suit.glowColor || this.suit.primaryColor;
+      ctx.globalAlpha = trail.alpha * 0.45;
+      ctx.fillStyle = trail.color || suit.glowColor || suit.primaryColor;
+      ctx.shadowColor = trail.color || suit.glowColor || suit.primaryColor;
+      ctx.shadowBlur = 12;
       ctx.beginPath();
-      ctx.ellipse(0, 0, this.playerWidth * 0.45, this.playerHeight * 0.45, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, this.playerWidth * 0.46, this.playerHeight * 0.46, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     });
 
-    ctx.save();
-    ctx.translate(this.playerX + this.playerWidth / 2, heroScreenY - this.playerHeight / 2);
-    ctx.rotate(this.playerRotation);
+    // 2. Aerodynamic Supersonic Wind Ribbons (High-velocity streaming lines)
+    if (isSprint || isSwing || this.heroPose === 'dive') {
+      ctx.save();
+      const ribbonAlpha = 0.35 + Math.random() * 0.25;
+      ctx.strokeStyle = suit.glowColor || '#38bdf8';
+      ctx.lineWidth = 1.8;
+      ctx.shadowColor = suit.glowColor || '#38bdf8';
+      ctx.shadowBlur = 8;
+      ctx.globalAlpha = ribbonAlpha;
 
-    const suit = this.suit;
+      for (let r = 0; r < 4; r++) {
+        const offsetR = (r - 1.5) * 14;
+        const trailLen = 35 + Math.random() * 30;
+        ctx.beginPath();
+        ctx.moveTo(this.playerX + this.playerWidth / 2 - 10, heroScreenY - this.playerHeight / 2 + offsetR);
+        ctx.lineTo(this.playerX + this.playerWidth / 2 - 10 - trailLen, heroScreenY - this.playerHeight / 2 + offsetR + (Math.random() - 0.5) * 6);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Spider-Man Root Transformation & Dynamic Pose Pivot
+    ctx.save();
+    ctx.translate(this.playerX + this.playerWidth / 2, heroScreenY - this.playerHeight / 2 + s.torsoOffsetY);
+    ctx.rotate(this.playerRotation + s.torsoAngle);
+
     const w = this.playerWidth;
     const halfW = w / 2;
 
-    // 1. Nano-Shield Hex Aura
+    // 3. Multi-Layered Suit Radiant Bloom & Combo Glow Field
+    ctx.save();
+    const glowIntensity = 10 + this.heroGlowPulse * 12 + (this.combo >= 5 ? 12 : 0);
+    ctx.shadowColor = suit.glowColor || suit.primaryColor;
+    ctx.shadowBlur = glowIntensity;
+
+    // 4. Nano-Shield Hexagonal Forcefield Aura
     if (this.shieldActive) {
       ctx.save();
-      const shieldPulse = 1 + Math.sin(this.frameCount * 0.1) * 0.06;
+      const shieldPulse = 1 + Math.sin(this.frameCount * 0.12) * 0.08;
       ctx.strokeStyle = '#38bdf8';
       ctx.lineWidth = 3;
       ctx.shadowColor = '#38bdf8';
       ctx.shadowBlur = 24;
 
-      // Hexagonal Shield Barrier
       ctx.beginPath();
       for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i + this.frameCount * 0.02;
-        const hx = Math.cos(angle) * (w * 0.75 * shieldPulse);
-        const hy = Math.sin(angle) * (w * 0.75 * shieldPulse);
+        const angle = (Math.PI / 3) * i + this.frameCount * 0.025;
+        const hx = Math.cos(angle) * (w * 0.8 * shieldPulse);
+        const hy = Math.sin(angle) * (w * 0.8 * shieldPulse);
         if (i === 0) ctx.moveTo(hx, hy);
         else ctx.lineTo(hx, hy);
       }
       ctx.closePath();
       ctx.stroke();
 
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.12)';
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
       ctx.fill();
       ctx.restore();
     }
 
-    // 2. Translucent Web Wings (Gliders)
+    // 5. Translucent Aerodynamic Web Wings
     if (this.webWingsTimer > 0 || this.heroPose === 'web_wings') {
       ctx.save();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 1.5;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.strokeStyle = suit.glowColor || '#38bdf8';
+      ctx.lineWidth = 1.8;
+      ctx.shadowColor = suit.glowColor || '#38bdf8';
+      ctx.shadowBlur = 10;
       
-      // Underarm Web Glider Wing
+      // Underarm Wing Fabric
       ctx.beginPath();
-      ctx.moveTo(-halfW * 0.4, -4);
-      ctx.lineTo(-halfW * 1.5, halfW * 0.7);
-      ctx.lineTo(-halfW * 0.2, halfW * 0.9);
+      ctx.moveTo(-halfW * 0.4, -6);
+      ctx.lineTo(-halfW * 1.6, halfW * 0.7);
+      ctx.lineTo(-halfW * 0.2, halfW * 1.0);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
 
-      // Wing Web Line Grid
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.lineWidth = 1;
+      // Translucent Wing Web Grid
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
-      ctx.moveTo(-halfW * 0.4, -4);
-      ctx.lineTo(-halfW * 0.8, halfW * 0.8);
-      ctx.moveTo(-halfW * 0.9, halfW * 0.2);
-      ctx.lineTo(-halfW * 0.3, halfW * 0.5);
+      ctx.moveTo(-halfW * 0.4, -6);
+      ctx.lineTo(-halfW * 0.9, halfW * 0.9);
+      ctx.moveTo(-halfW * 1.1, halfW * 0.2);
+      ctx.lineTo(-halfW * 0.3, halfW * 0.6);
       ctx.stroke();
       ctx.restore();
     }
 
-    // 3. Miles Morales Bio-Electric Sparks / 2099 Glitch FX
-    if (suit.id === 'miles' && (this.isSwinging || this.gameSpeed > 5)) {
+    // 6. SUIT-SPECIFIC SUPERPOWER VISUALS & EFFECTS
+    // A. Miles Morales Bio-Electric Venom Strike Lightning Arcs
+    if (suit.id === 'miles' && (isSwing || isSprint || this.combo >= 4 || this.heroPose === 'jump')) {
       ctx.save();
-      ctx.strokeStyle = Math.random() > 0.5 ? '#facc15' : '#38bdf8';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = Math.random() > 0.4 ? '#facc15' : '#38bdf8';
+      ctx.lineWidth = 2.4;
       ctx.shadowColor = '#facc15';
-      ctx.shadowBlur = 10;
-      for (let i = 0; i < 3; i++) {
+      ctx.shadowBlur = 14;
+
+      for (let i = 0; i < 4; i++) {
         ctx.beginPath();
-        ctx.moveTo((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 30);
-        ctx.lineTo((Math.random() - 0.5) * 35, (Math.random() - 0.5) * 45);
+        let lx = (Math.random() - 0.5) * 24;
+        let ly = (Math.random() - 0.5) * 32;
+        ctx.moveTo(lx, ly);
+        for (let seg = 0; seg < 3; seg++) {
+          lx += (Math.random() - 0.5) * 20;
+          ly += (Math.random() - 0.5) * 20;
+          ctx.lineTo(lx, ly);
+        }
         ctx.stroke();
       }
       ctx.restore();
     }
 
-    // --- ANATOMICAL LIMB KINEMATICS ---
-    const runCycle = this.runAnimCycle;
-    const isAir = !this.isGrounded && !this.isSwinging;
-    const isSwing = this.isSwinging;
+    // B. Iron Spider: 4 Articulated Nanotech Golden Waldoes (Mechanical Spider Legs)
+    if (suit.id === 'iron_spider') {
+      ctx.save();
+      const waldoPulse = Math.sin(this.frameCount * 0.15) * 0.12;
+      const waldoAngles = [
+        -2.1 + (isSwing ? 0.3 : waldoPulse),
+        -1.3 - (isSwing ? 0.2 : waldoPulse),
+        1.3 + (isSwing ? 0.2 : waldoPulse),
+        2.1 - (isSwing ? 0.3 : waldoPulse),
+      ];
 
-    // 1. Back Arm (Shoulder -> Bicep -> Forearm & Web Shooter)
-    const backArmAngle = isSwing ? -1.1 : isAir ? -0.7 : Math.sin(runCycle + Math.PI) * 0.75;
-    this.renderHeroLimb(ctx, -10, -6, backArmAngle, 24, suit.primaryColor, suit.secondaryColor, true, suit.id);
+      waldoAngles.forEach((baseAngle, idx) => {
+        ctx.save();
+        ctx.translate(-2, idx < 2 ? -6 : 4);
+        ctx.rotate(baseAngle);
 
-    // 2. Back Leg (Hip -> Thigh -> Calf & Boot)
-    const backLegAngle = isSwing ? 0.6 : isAir ? 0.5 : Math.sin(runCycle + Math.PI) * 0.85;
-    this.renderHeroLimb(ctx, -6, 12, backLegAngle, 28, suit.secondaryColor, suit.primaryColor, false, suit.id);
+        // Waldo Segment 1 (Upper Segment - Gold Armor)
+        ctx.strokeStyle = '#eab308';
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = '#eab308';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, -18);
+        ctx.stroke();
+
+        // Waldo Articulation Joint
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.arc(0, -18, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Waldo Segment 2 (Lower Segment - Sharp Claws)
+        ctx.translate(0, -18);
+        ctx.rotate(idx < 2 ? -0.7 : 0.7);
+        ctx.strokeStyle = '#fef08a';
+        ctx.lineWidth = 2.8;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, -16);
+        ctx.stroke();
+
+        // Glowing Cyan Repulsor Tip Node
+        ctx.fillStyle = '#38bdf8';
+        ctx.shadowColor = '#38bdf8';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(0, -16, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      });
+      ctx.restore();
+    }
+
+    // C. Symbiote Writhing Living Tendrils
+    if (suit.id === 'symbiote' && (isSwing || isSprint || this.combo >= 2)) {
+      ctx.save();
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 2.2;
+      ctx.shadowColor = '#a855f7';
+      ctx.shadowBlur = 10;
+
+      for (let t = 0; t < 3; t++) {
+        const angle = -1.2 + t * 1.2 + Math.sin(this.frameCount * 0.2 + t) * 0.4;
+        ctx.beginPath();
+        ctx.moveTo(-4, -4 + t * 6);
+        const tx = Math.cos(angle) * (20 + Math.sin(this.frameCount * 0.25) * 6);
+        const ty = Math.sin(angle) * (20 + Math.cos(this.frameCount * 0.25) * 6);
+        ctx.quadraticCurveTo(-15, ty * 0.5, tx, ty);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // D. Spider-Man 2099 Holographic Glitch Silhouette
+    if (suit.id === 'spiderman_2099' && (this.frameCount % 5 === 0)) {
+      ctx.save();
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#ef4444';
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 8;
+      ctx.fillRect(-12 + (Math.random() - 0.5) * 8, -14, 24, 28);
+      ctx.restore();
+    }
+
+    // --- ANATOMICAL LIMB SKELETAL KINEMATICS RENDERING ---
+    // 1. Back Arm (Trailing Arm)
+    this.renderHeroLimb(
+      ctx,
+      -9,
+      -6,
+      s.armTrailUpper,
+      s.armTrailLower,
+      23,
+      suit.primaryColor,
+      suit.secondaryColor,
+      true,
+      suit.id,
+      s.armTrailGesture
+    );
+
+    // 2. Back Leg (Trailing Leg)
+    this.renderHeroLimb(
+      ctx,
+      -6,
+      12,
+      s.legTrailUpper,
+      s.legTrailLower,
+      27,
+      suit.secondaryColor,
+      suit.primaryColor,
+      false,
+      suit.id
+    );
 
     // 3. Muscular Anatomical Torso & Chest Armor
     ctx.save();
@@ -2801,7 +3240,7 @@ export class SpiderGameEngine {
       ctx.fillStyle = '#ffffff';
       ctx.lineWidth = 2.5;
       ctx.shadowColor = '#a855f7';
-      ctx.shadowBlur = 6;
+      ctx.shadowBlur = 8;
 
       ctx.beginPath();
       // Spider Body
@@ -2845,7 +3284,7 @@ export class SpiderGameEngine {
       ctx.strokeStyle = '#eab308';
       ctx.lineWidth = 2.5;
       ctx.shadowColor = '#38bdf8';
-      ctx.shadowBlur = 6;
+      ctx.shadowBlur = 8;
       ctx.beginPath();
       ctx.moveTo(-8, -6); ctx.lineTo(1, 0); ctx.lineTo(9, -6);
       ctx.moveTo(-9, 8);  ctx.lineTo(1, 0); ctx.lineTo(10, 8);
@@ -2889,21 +3328,39 @@ export class SpiderGameEngine {
     ctx.restore();
     ctx.restore(); // Restore Torso
 
-    // 4. Front Leg (Hip -> Knee -> Shin -> Boot)
-    const frontLegAngle = isSwing ? -0.4 : isAir ? -0.6 : Math.sin(runCycle) * 0.85;
-    this.renderHeroLimb(ctx, 4, 12, frontLegAngle, 28, suit.secondaryColor, suit.primaryColor, false, suit.id);
+    // 4. Front Leg (Leading Leg)
+    this.renderHeroLimb(
+      ctx,
+      4,
+      12,
+      s.legLeadUpper,
+      s.legLeadLower,
+      27,
+      suit.secondaryColor,
+      suit.primaryColor,
+      false,
+      suit.id
+    );
 
-    // 5. Front Arm (Shoulder -> Bicep -> Forearm & Thwip Hand Gesture)
-    const frontArmAngle = isSwing ? -1.6 : isAir ? 0.75 : Math.sin(runCycle) * 0.75;
-    this.renderHeroLimb(ctx, 8, -6, frontArmAngle, 24, suit.primaryColor, suit.secondaryColor, true, suit.id);
+    // 5. Front Arm (Leading Arm & Web Shooter)
+    this.renderHeroLimb(
+      ctx,
+      8,
+      -6,
+      s.armLeadUpper,
+      s.armLeadLower,
+      23,
+      suit.primaryColor,
+      suit.secondaryColor,
+      true,
+      suit.id,
+      s.armLeadGesture
+    );
 
     // 6. Spider-Man Head, Mask Silhouette & Expressive Mask Lenses
     ctx.save();
     ctx.translate(4, -18);
-
-    // Head tilt based on movement / swing angle
-    const headTilt = isSwing ? -0.2 : (this.velocityX > 0 ? 0.1 : 0);
-    ctx.rotate(headTilt);
+    ctx.rotate(s.headAngle);
 
     // Head Base Mask
     ctx.fillStyle = suit.primaryColor;
@@ -2939,7 +3396,6 @@ export class SpiderGameEngine {
 
     // Front (Right) Eye Lens
     ctx.save();
-    // Beveled Black Rim
     ctx.fillStyle = '#020617';
     ctx.strokeStyle = '#020617';
     ctx.lineWidth = 3;
@@ -2951,10 +3407,10 @@ export class SpiderGameEngine {
     ctx.stroke();
     ctx.fill();
 
-    // Inner Specular White/Cyan Lens
+    // Inner Specular White/Cyan Lens with Radiant Eye Glow
     ctx.fillStyle = suit.eyeColor || '#ffffff';
-    ctx.shadowColor = suit.glowColor || '#ffffff';
-    ctx.shadowBlur = 8;
+    ctx.shadowColor = suit.glowColor || suit.eyeColor || '#ffffff';
+    ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.moveTo(4, -5);
     ctx.lineTo(11.5, -2 + squintY * 0.8);
@@ -2983,8 +3439,8 @@ export class SpiderGameEngine {
     ctx.fill();
 
     ctx.fillStyle = suit.eyeColor || '#ffffff';
-    ctx.shadowColor = suit.glowColor || '#ffffff';
-    ctx.shadowBlur = 8;
+    ctx.shadowColor = suit.glowColor || suit.eyeColor || '#ffffff';
+    ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.moveTo(-2.5, -5);
     ctx.lineTo(-7.5, -2 + squintY * 0.8);
@@ -2995,6 +3451,7 @@ export class SpiderGameEngine {
 
     ctx.restore(); // Restore Head
 
+    ctx.restore(); // Restore Glow
     ctx.restore(); // Restore Hero Root
   }
 
@@ -3003,16 +3460,18 @@ export class SpiderGameEngine {
     ctx: CanvasRenderingContext2D,
     pivotX: number,
     pivotY: number,
-    angle: number,
+    upperAngle: number,
+    lowerAngle: number,
     totalLength: number,
     mainColor: string,
     accentColor: string,
     isArm: boolean,
-    suitId?: string
+    suitId?: string,
+    gesture: 'thwip' | 'fist' | 'open' | 'web_grip' = 'thwip'
   ) {
     ctx.save();
     ctx.translate(pivotX, pivotY);
-    ctx.rotate(angle);
+    ctx.rotate(upperAngle);
 
     const halfLen = totalLength * 0.52;
 
@@ -3022,15 +3481,14 @@ export class SpiderGameEngine {
     ctx.roundRect(-4.5, 0, 9, halfLen, 4);
     ctx.fill();
 
-    // Muscle Shading on Upper Limb
-    ctx.fillStyle = 'rgba(2, 6, 23, 0.2)';
+    // Muscle Shading & Specular Contour on Upper Limb
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.22)';
     ctx.fillRect(-4.5, 0, 2.5, halfLen);
 
     // Segment 2: Lower Limb (Forearm & Web Gauntlet / Shin & Boot)
     ctx.save();
     ctx.translate(0, halfLen);
-    // Slight natural joint bend
-    ctx.rotate(isArm ? 0.25 : -0.2);
+    ctx.rotate(lowerAngle);
 
     ctx.fillStyle = accentColor;
     ctx.beginPath();
@@ -3038,27 +3496,44 @@ export class SpiderGameEngine {
     ctx.fill();
 
     if (isArm) {
-      // Metallic Web Shooter Wrist Cuff with Red LED
+      // Metallic Web Shooter Wrist Cuff with LED
       ctx.fillStyle = suitId === 'iron_spider' ? '#eab308' : '#e2e8f0';
       ctx.fillRect(-4.5, halfLen - 6, 9, 4);
 
       // Web Trigger LED Indicator
-      ctx.fillStyle = '#ef4444';
-      ctx.shadowColor = '#ef4444';
-      ctx.shadowBlur = 4;
+      const ledColor = suitId === 'iron_spider' ? '#38bdf8' : '#ef4444';
+      ctx.fillStyle = ledColor;
+      ctx.shadowColor = ledColor;
+      ctx.shadowBlur = 6;
       ctx.fillRect(-1.5, halfLen - 5, 3, 2);
       ctx.shadowBlur = 0;
 
-      // Iconic "Thwip!" Hand Sign (Fingers Articulated)
+      // Articulated Hand Gesture
       ctx.fillStyle = mainColor;
       ctx.beginPath();
       // Palm
       ctx.roundRect(-3.5, halfLen, 7, 5, 2);
       ctx.fill();
 
-      // Extended Index & Pinky Fingers
-      ctx.fillRect(-3.5, halfLen + 4, 2, 4); // Index
-      ctx.fillRect(1.5, halfLen + 4, 2, 4);  // Pinky
+      if (gesture === 'thwip') {
+        // Iconic "Thwip!" Sign: Extended Index & Pinky Fingers
+        ctx.fillRect(-3.5, halfLen + 4, 2, 4.5); // Index
+        ctx.fillRect(1.5, halfLen + 4, 2, 4.5);  // Pinky
+      } else if (gesture === 'web_grip') {
+        // Grip stance around web line
+        ctx.fillStyle = mainColor;
+        ctx.fillRect(-4, halfLen + 2, 8, 3.5);
+      } else if (gesture === 'open') {
+        // Aerodynamic open splayed fingers
+        ctx.fillRect(-3.5, halfLen + 4, 2, 4);
+        ctx.fillRect(-1, halfLen + 4, 2, 4.5);
+        ctx.fillRect(1.5, halfLen + 4, 2, 4);
+      } else {
+        // Clenched athletic fist
+        ctx.beginPath();
+        ctx.arc(0, halfLen + 3.5, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
     } else {
       // Athletic High-Traction Hero Boot Sole
       ctx.fillStyle = '#020617';

@@ -29,13 +29,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const container = containerRef.current;
 
     const updateCanvasDimensions = () => {
-      const w = container.clientWidth || window.innerWidth;
-      const h = container.clientHeight || window.innerHeight;
+      // Mobile viewport ke actual boundary ko target karta hai
+      const w = window.visualViewport?.width || window.innerWidth || container.clientWidth;
+      const h = window.visualViewport?.height || window.innerHeight || container.clientHeight;
 
-      canvas.width = w;
-      canvas.height = h;
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
+      canvas.width = Math.floor(w);
+      canvas.height = Math.floor(h);
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
     };
 
     updateCanvasDimensions();
@@ -56,11 +57,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     window.addEventListener('resize', updateCanvasDimensions);
     window.addEventListener('orientationchange', updateCanvasDimensions);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateCanvasDimensions);
+    }
 
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateCanvasDimensions);
       window.removeEventListener('orientationchange', updateCanvasDimensions);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', updateCanvasDimensions);
+      }
       engine.stop();
     };
   }, []);
@@ -122,9 +129,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     <div
       ref={containerRef}
       id="game-canvas-container"
-      className="fixed inset-0 w-full h-full select-none overflow-hidden touch-none bg-black"
+      className="fixed inset-0 select-none overflow-hidden touch-none bg-black"
+      style={{
+        width: '100vw',
+        height: '100dvh',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+      }}
     >
-      <canvas ref={canvasRef} className="w-full h-full block" />
+      <canvas
+        ref={canvasRef}
+        className="block w-full h-full"
+        style={{ width: '100%', height: '100%', display: 'block' }}
+      />
     </div>
   );
 };
